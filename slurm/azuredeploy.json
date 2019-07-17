@@ -33,7 +33,7 @@
           "metadata": {
               "description": "The base URI where artifacts required by this template are located. When the template is deployed using the accompanying scripts, a private location in the subscription will be used and this value will be automatically generated."
           },
-          "defaultValue": "https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/slurm"
+          "defaultValue": "https://raw.githubusercontent.com/ousamg/azure-quickstart-templates/master/slurm"
       },
       "_artifactsLocationSasToken": {
           "type": "securestring",
@@ -52,9 +52,9 @@
   },
   "variables": {
       "dnsName": "[concat('slurm-', uniqueString(resourceGroup().id))]",
-      "imagePublisher": "Canonical",
-      "imageOffer": "UbuntuServer",
-      "ubuntuOSVersion": "16.04-LTS",
+      "imagePublisher": "OpenLogic",
+      "imageOffer": "CentOS",
+      "imageSku": "7.5",
       "publicIPAddressName": "publicip",
       "vmNameMaster": "master",
       "vmNameWorker": "worker",
@@ -163,7 +163,7 @@
                   "imageReference": {
                       "publisher": "[variables('imagePublisher')]",
                       "offer": "[variables('imageOffer')]",
-                      "sku": "[variables('ubuntuOSVersion')]",
+                      "sku": "[variables('imageSku')]",
                       "version": "latest"
                   },
                   "osDisk": {
