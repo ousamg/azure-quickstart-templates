@@ -20,15 +20,15 @@ fi
 ###################################
 
 # Parameters
-MASTER_NAME=$1
-MASTER_IP=$2
-WORKER_NAME=$3
-WORKER_IP_BASE=$4
-WORKER_IP_START=$5
-NUM_OF_VM=$6
-ADMIN_USERNAME=$7
-ADMIN_PASSWORD=$8
-TEMPLATE_BASE=$9
+export MASTER_NAME=$1
+export MASTER_IP=$2
+export WORKER_NAME=$3
+export WORKER_IP_BASE=$4
+export WORKER_IP_START=$5
+export NUM_OF_VM=$6
+export ADMIN_USERNAME=$7
+export ADMIN_PASSWORD=$8
+export TEMPLATE_BASE=$9
 
 # Update master node
 echo $MASTER_IP $MASTER_NAME >> /etc/hosts
@@ -42,18 +42,19 @@ sudo -u $ADMIN_USERNAME sh -c "mkdir /home/$ADMIN_USERNAME/.ssh/;echo Host worke
 if ! [ -f /home/$ADMIN_USERNAME/.ssh/id_rsa ]; then
     sudo -u $ADMIN_USERNAME sh -c "ssh-keygen -f /home/$ADMIN_USERNAME/.ssh/id_rsa -t rsa -N ''"
 fi
+# nopasswd sudo for admin user
+sed -i 's/ALL$/NOPASSWD:ALL/' /etc/sudoers.d/waagent
 
 # Install sshpass to automate ssh-copy-id action
-sudo apt-get install sshpass -y >> /tmp/azuredeploy.log.$$ 2>&1
+sudo yum install sshpass -y >> /tmp/azuredeploy.log.$$ 2>&1
 
 # Loop through all worker nodes, update hosts file and copy ssh public key to it
 # The script make the assumption that the node is called %WORKER+<index> and have
 # static IP in sequence order
-i=0
-while [ $i -lt $NUM_OF_VM ]
-do
+lastvm=`expr $NUM_OF_VM - 1`
+for i in $(seq 0 $lastvm); do
    workerip=`expr $i + $WORKER_IP_START`
-   echo 'I update host - '$WORKER_NAME$i >> /tmp/azuredeploy.log.$$ 2>&1
+   echo 'Updating host - '$WORKER_NAME$i >> /tmp/azuredeploy.log.$$ 2>&1
    echo $WORKER_IP_BASE$workerip $WORKER_NAME$i >> /etc/hosts
    echo $WORKER_IP_BASE$workerip $WORKER_NAME$i >> /tmp/hosts.$$
    sudo -u $ADMIN_USERNAME sh -c "sshpass -p '$ADMIN_PASSWORD' ssh-copy-id $WORKER_NAME$i"
@@ -63,61 +64,104 @@ done
 # Install SLURM on master node
 ###################################
 
-# Install the package
-sudo apt-get update >> /tmp/azuredeploy.log.$$ 2>&1
-sudo chmod g-w /var/log >> /tmp/azuredeploy.log.$$ 2>&1 # Must do this before munge will generate key
-sudo apt-get install slurm-wlm munge -y >> /tmp/azuredeploy.log.$$ 2>&1
+# set up munge/slurm users
+export MUNGEUSER=991
+groupadd -g $MUNGEUSER munge
+useradd  -m -c "MUNGE Uid 'N' Gid Emporium" -d /var/lib/munge -u $MUNGEUSER -g munge  -s /sbin/nologin munge
+export SLURMUSER=992
+groupadd -g $SLURMUSER slurm
+useradd  -m -c "SLURM workload manager" -d /var/lib/slurm -u $SLURMUSER -g slurm  -s /bin/bash slurm
+
+# install munge
+yum install -y munge-devel munge-libs munge
+/usr/sbin/create-munge-key -r
+
+# Install slurm deps and munge
+yum install epel-release -y >> /tmp/azuredeploy.log.$$ 2>&1
+# chmod g-w /var/log >> /tmp/azuredeploy.log.$$ 2>&1 # Must do this before munge will generate key
+yum install openssl openssl-devel pam-devel numactl numactl-devel hwloc hwloc-devel lua lua-devel \
+    readline-devel rrdtool-devel ncurses-devel man2html libibmad libibumad rpm-build gcc perl-ExtUtils-MakeMaker \
+    mariadb-server mariadb-devel -y >> /tmp/azuredeploy.log.$$ 2>&1
+
+# grab slurm, convert to rpm, and install
+SLURM_VERSION=18.08.5-2     # pinned to TSD version
+SLURM_URL=https://download.schedmd.com/slurm/slurm-${SLURM_VERSION}.tar.bz2
+RPM_DIR=/root/rpmbuild/RPMS/x86_64
+wget "$SLURM_URL" >> /tmp/azuredeploy.log.$$ 2>&1
+rpmbuild -ta slurm-${SLURM_VERSION}.tar.bz2
+yum localinstall $RPM_DIR/*.rpm -y
+tar -C $RPM_DIR -cvf slurm-rpms.tar .
 
 # Download slurm.conf and fill in the node info
 SLURMCONF=/tmp/slurm.conf.$$
 wget $TEMPLATE_BASE/slurm.template.conf -O $SLURMCONF >> /tmp/azuredeploy.log.$$ 2>&1
 sed -i -- 's/__MASTERNODE__/'"$MASTER_NAME"'/g' $SLURMCONF >> /tmp/azuredeploy.log.$$ 2>&1
-lastvm=`expr $NUM_OF_VM - 1`
 sed -i -- 's/__WORKERNODES__/'"$WORKER_NAME"'[0-'"$lastvm"']/g' $SLURMCONF >> /tmp/azuredeploy.log.$$ 2>&1
-sudo cp -f $SLURMCONF /etc/slurm-llnl/slurm.conf >> /tmp/azuredeploy.log.$$ 2>&1
-sudo chown slurm /etc/slurm-llnl/slurm.conf >> /tmp/azuredeploy.log.$$ 2>&1
-sudo chmod o+w /var/spool # Write access for slurmctld log. Consider switch log file to another location
+cp -f $SLURMCONF /etc/slurm/slurm.conf >> /tmp/azuredeploy.log.$$ 2>&1
+chown slurm /etc/slurm/slurm.conf >> /tmp/azuredeploy.log.$$ 2>&1
+mkdir /var/spool/slurmctld
+chown slurm. /var/spool/slurmctld
+chmod 755 /var/spool/slurmctld
+touch /var/log/slurmctld.log
+chown slurm: /var/log/slurmctld.log
+touch /var/log/slurm_jobacct.log /var/log/slurm_jobcomp.log
+chown slurm: /var/log/slurm_jobacct.log /var/log/slurm_jobcomp.log
+
+# start services on master
 sudo -u slurm /usr/sbin/slurmctld >> /tmp/azuredeploy.log.$$ 2>&1 # Start the master daemon service
-sudo munged --force >> /tmp/azuredeploy.log.$$ 2>&1 # Start munged
-sudo slurmd >> /tmp/azuredeploy.log.$$ 2>&1 # Start the node
+systemctl enable munge >> /tmp/azuredeploy.log.$$ 2>&1
+systemctl start munge >> /tmp/azuredeploy.log.$$ 2>&1 # Start munged
+slurmd >> /tmp/azuredeploy.log.$$ 2>&1 # Start the node
 
 # Install slurm on all nodes by running apt-get
 # Also push munge key and slurm.conf to them
 echo "Prepare the local copy of munge key" >> /tmp/azuredeploy.log.$$ 2>&1
 
 mungekey=/tmp/munge.key.$$
-sudo cp -f /etc/munge/munge.key $mungekey
-sudo chown $ADMIN_USERNAME $mungekey
+cp -f /etc/munge/munge.key $mungekey
+chown $ADMIN_USERNAME $mungekey
 
 echo "Start looping all workers" >> /tmp/azuredeploy.log.$$ 2>&1
 
-i=0
-while [ $i -lt $NUM_OF_VM ]
-do
+for i in $(seq 0 $lastvm); do
    worker=$WORKER_NAME$i
 
    echo "SCP to $worker"  >> /tmp/azuredeploy.log.$$ 2>&1
-   sudo -u $ADMIN_USERNAME scp $mungekey $ADMIN_USERNAME@$worker:/tmp/munge.key >> /tmp/azuredeploy.log.$$ 2>&1
-   sudo -u $ADMIN_USERNAME scp $SLURMCONF $ADMIN_USERNAME@$worker:/tmp/slurm.conf >> /tmp/azuredeploy.log.$$ 2>&1
-   sudo -u $ADMIN_USERNAME scp /tmp/hosts.$$ $ADMIN_USERNAME@$worker:/tmp/hosts >> /tmp/azuredeploy.log.$$ 2>&1
+   sudo -u $ADMIN_USERNAME scp $mungekey $SLURMCONF /tmp/hosts.$$ slurm-rpms.tar $worker:/tmp/ >> /tmp/azuredeploy.log.$$ 2>&1
 
    echo "Remote execute on $worker" >> /tmp/azuredeploy.log.$$ 2>&1
-   sudo -u $ADMIN_USERNAME ssh $ADMIN_USERNAME@$worker >> /tmp/azuredeploy.log.$$ 2>&1 << 'ENDSSH1'
-      sudo sh -c "cat /tmp/hosts >> /etc/hosts"
-      sudo chmod g-w /var/log
-      sudo apt-get update
-      sudo apt-get install slurm-wlm munge -y
-      sudo cp -f /tmp/munge.key /etc/munge/munge.key
-      sudo chown munge /etc/munge/munge.key
-      sudo chgrp munge /etc/munge/munge.key
-      sudo rm -f /tmp/munge.key
-      sudo /usr/sbin/munged --force # ignore egregrious security warning
-      sudo cp -f /tmp/slurm.conf /etc/slurm-llnl/slurm.conf
-      sudo chown slurm /etc/slurm-llnl/slurm.conf
-      sudo slurmd
+   sudo -u $ADMIN_USERNAME ssh $ADMIN_USERNAME@$worker >> /tmp/azuredeploy.log.$$ 2>&1 << ENDSSH1
+        echo $ADMIN_PASSWORD | sudo -S sed -i 's/ALL\$/NOPASSWD:ALL/' /etc/sudoers.d/waagent
+        cat /tmp/hosts.* | sudo tee -a /etc/hosts
+
+        export MUNGEUSER=991
+        sudo groupadd -g $MUNGEUSER munge
+        sudo useradd  -m -c "MUNGE Uid 'N' Gid Emporium" -d /var/lib/munge -u $MUNGEUSER -g munge  -s /sbin/nologin munge
+        export SLURMUSER=992
+        sudo groupadd -g $SLURMUSER slurm
+        sudo useradd  -m -c "SLURM workload manager" -d /var/lib/slurm -u $SLURMUSER -g slurm  -s /bin/bash slurm
+
+        sudo yum install epel-release -y
+        sudo yum install -y openssl openssl-devel pam-devel numactl numactl-devel hwloc hwloc-devel lua lua-devel \
+            readline-devel rrdtool-devel ncurses-devel man2html libibmad libibumad rpm-build gcc perl-ExtUtils-MakeMaker \
+            mariadb-server mariadb-devel munge-devel munge-libs munge
+
+        sudo cp -f /tmp/munge.key.* /etc/munge/munge.key
+        sudo chown munge. /etc/munge/munge.key
+        rm -f /tmp/munge.*
+        sudo systemctl enable munge
+        sudo systemctl start munge
+
+        mkdir rpms
+        tar xf /tmp/slurm-rpms.tar -C rpms/
+        sudo yum localinstall -y rpms/*.rpm
+
+        sudo cp -f /tmp/slurm.conf.* /etc/slurm/slurm.conf
+        sudo chown slurm /etc/slurm/slurm.conf
+        sudo systemctl enable slurmd
+        sudo systemctl start slurmd
 ENDSSH1
 
-   i=`expr $i + 1`
 done
 rm -f $mungekey
 
