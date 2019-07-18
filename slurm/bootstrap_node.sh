@@ -57,9 +57,9 @@ yum localinstall $RPM_DIR/*.rpm -y
 if [[ "$NODE_TYPE" == "master" ]]; then
     wget $TEMPLATE_BASE/slurm.template.conf -O $SLURM_CONF
     sed -i -- 's/__MASTERNODE__/'"$MASTER_NAME"'/g' $SLURM_CONF
-    sed -i -- 's/__WORKERNODES__/'"$WORKER_NAME"'[0-'"$lastvm"']/g' $SLURM_CONF
+    sed -i -- 's/__WORKERNODES__/'"$WORKER_NAME"'[0-'"$LASTVM"']/g' $SLURM_CONF
 else
-    SLURM_CONF=/tmp/slurm.conf.*
+    SLURM_CONF="/tmp/slurm.conf.*"
     if [[ ! -f $SLURM_CONF ]]; then
         echo "No slurm.conf found: '$SLURM_CONF'"
         exit 1
@@ -83,8 +83,8 @@ echo "Prepare the local copy of munge key"
 if [[ "$NODE_TYPE" == "master" ]]; then
     cp -f /etc/munge/munge.key $MUNGEKEY
     chown ${ADMIN_USERNAME}. $MUNGEKEY
-if [[ "$NODE_TYPE" == "worker" ]]; then
-    MUNGEKEY=/tmp/munge.key.*
+else
+    MUNGEKEY="/tmp/munge.key.*"
     if [[ ! -f $MUNGEKEY ]]; then
         echo "No munge.key found: '$MUNGEKEY'"
         exit 1

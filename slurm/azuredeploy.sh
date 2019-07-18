@@ -6,10 +6,12 @@
 # This script will install SLURM on a Linux cluster deployed on a set of Azure VMs
 
 # Basic info
-date > /tmp/azuredeploy.log.$$ 2>&1
+export DEPLOY_LOG=/tmp/azuredeploy.log.$$
+
+date > $DEPLOY_LOG 2>&1
 whoami >> $DEPLOY_LOG 2>&1
-echo $@ >> $DEPLOY_LOG 2>&1
-pwd >>  /tmp/azuredeploy.log.$$ 2>&1
+echo "$@" >> $DEPLOY_LOG 2>&1
+pwd >> $DEPLOY_LOG 2>&1
 
 # Usage
 if [ "$#" -ne 9 ]; then
@@ -48,12 +50,12 @@ fi
 sed -i 's/ALL$/NOPASSWD:ALL/' /etc/sudoers.d/waagent
 
 # Set filename vars
-export BOOTSTRAP_EXE=bootstrap_node.sh
 export RPM_TAR=/tmp/slurm-rpms.tar
 export MUNGEKEY=/tmp/munge.key.$$
 export SLURM_HOSTS=/tmp/hosts.$$
-export DEPLOY_LOG=/tmp/azuredeploy.log.$$
 export SLURM_CONF=/tmp/slurm.conf.$$
+export BOOTSTRAP_EXE=bootstrap_node.sh
+cp $BOOTSTRAP_EXE /tmp/$BOOTSTRAP_EXE
 
 # Install sshpass to automate ssh-copy-id action
 sudo yum install sshpass -y >> $DEPLOY_LOG 2>&1
@@ -81,7 +83,7 @@ for i in $(seq 0 $LAST_VM); do
    worker=$WORKER_NAME$i
 
    echo "SCP to $worker"  >> $DEPLOY_LOG 2>&1
-   sudo -u $ADMIN_USERNAME scp $MUNGEKEY $SLURM_CONF $SLURM_HOSTS $RPM_TAR $BOOTSTRAP_EXE $worker:/tmp/ >> $DEPLOY_LOG 2>&1
+   sudo -u $ADMIN_USERNAME scp $MUNGEKEY $SLURM_CONF $SLURM_HOSTS $RPM_TAR "/tmp/$BOOTSTRAP_EXE" $worker:/tmp/ >> $DEPLOY_LOG 2>&1
 
    echo "Remote execute on $worker" >> $DEPLOY_LOG 2>&1
    # update /etc/hosts with slurm nodes, install everything, then disable passwordless sudo
