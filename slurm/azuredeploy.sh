@@ -74,11 +74,11 @@ groupadd -g $SLURMUSER slurm >> /tmp/azuredeploy.log.$$ 2>&1
 useradd  -m -c "SLURM workload manager" -d /var/lib/slurm -u $SLURMUSER -g slurm  -s /bin/bash slurm >> /tmp/azuredeploy.log.$$ 2>&1
 
 # install munge
+yum install epel-release -y >> /tmp/azuredeploy.log.$$ 2>&1
 yum install -y munge-devel munge-libs munge >> /tmp/azuredeploy.log.$$ 2>&1
 /usr/sbin/create-munge-key -r >> /tmp/azuredeploy.log.$$ 2>&1
 
 # Install slurm deps and munge
-yum install epel-release -y >> /tmp/azuredeploy.log.$$ 2>&1
 # chmod g-w /var/log >> /tmp/azuredeploy.log.$$ 2>&1 # Must do this before munge will generate key
 yum install openssl openssl-devel pam-devel numactl numactl-devel hwloc hwloc-devel lua lua-devel \
     readline-devel rrdtool-devel ncurses-devel man2html libibmad libibumad rpm-build gcc perl-ExtUtils-MakeMaker \
