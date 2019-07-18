@@ -7,13 +7,13 @@
 
 # Basic info
 date > /tmp/azuredeploy.log.$$ 2>&1
-whoami >> /tmp/azuredeploy.log.$$ 2>&1
-echo $@ >> /tmp/azuredeploy.log.$$ 2>&1
+whoami >> $DEPLOY_LOG 2>&1
+echo $@ >> $DEPLOY_LOG 2>&1
 pwd >>  /tmp/azuredeploy.log.$$ 2>&1
 
 # Usage
 if [ "$#" -ne 9 ]; then
-  echo "Usage: $0 MASTER_NAME MASTER_IP WORKER_NAME WORKER_IP_BASE WORKER_IP_START NUM_OF_VM ADMIN_USERNAME ADMIN_PASSWORD TEMPLATE_BASE" >> /tmp/azuredeploy.log.$$
+  echo "Usage: $0 MASTER_NAME MASTER_IP WORKER_NAME WORKER_IP_BASE WORKER_IP_START NUM_OF_VM ADMIN_USERNAME ADMIN_PASSWORD TEMPLATE_BASE" >> $DEPLOY_LOG
   exit 1
 fi
 
@@ -43,128 +43,55 @@ sudo -u $ADMIN_USERNAME sh -c "mkdir /home/$ADMIN_USERNAME/.ssh/;echo Host worke
 if ! [ -f /home/$ADMIN_USERNAME/.ssh/id_rsa ]; then
     sudo -u $ADMIN_USERNAME sh -c "ssh-keygen -f /home/$ADMIN_USERNAME/.ssh/id_rsa -t rsa -N ''"
 fi
-# nopasswd sudo for admin user
+
+# nopasswd sudo for admin user, disabled at the end
 sed -i 's/ALL$/NOPASSWD:ALL/' /etc/sudoers.d/waagent
 
+# Set filename vars
+export BOOTSTRAP_EXE=bootstrap_node.sh
+export RPM_TAR=/tmp/slurm-rpms.tar
+export MUNGEKEY=/tmp/munge.key.$$
+export SLURM_HOSTS=/tmp/hosts.$$
+export DEPLOY_LOG=/tmp/azuredeploy.log.$$
+export SLURM_CONF=/tmp/slurm.conf.$$
+
 # Install sshpass to automate ssh-copy-id action
-sudo yum install sshpass -y >> /tmp/azuredeploy.log.$$ 2>&1
+sudo yum install sshpass -y >> $DEPLOY_LOG 2>&1
 
 # Loop through all worker nodes, update hosts file and copy ssh public key to it
-# The script make the assumption that the node is called %WORKER+<index> and have
+# The script make the assumption that the node is called $WORKER+<index> and have
 # static IP in sequence order
-lastvm=`expr $NUM_OF_VM - 1`
-for i in $(seq 0 $lastvm); do
-   workerip=`expr $i + $WORKER_IP_START`
-   echo 'Updating host - '$WORKER_NAME$i >> /tmp/azuredeploy.log.$$ 2>&1
-   echo $WORKER_IP_BASE$workerip $WORKER_NAME$i >> /etc/hosts
-   echo $WORKER_IP_BASE$workerip $WORKER_NAME$i >> /tmp/hosts.$$
+LAST_VM=$(expr $NUM_OF_VM - 1)
+for i in $(seq 0 $LAST_VM); do
+   workerip=$(expr $i + $WORKER_IP_START)
+   echo 'Updating host - '$WORKER_NAME$i >> $DEPLOY_LOG 2>&1
+   echo $WORKER_IP_BASE$workerip $WORKER_NAME$i >> $SLURM_HOSTS
    sudo -u $ADMIN_USERNAME sh -c "sshpass -p '$ADMIN_PASSWORD' ssh-copy-id $WORKER_NAME$i"
-   i=`expr $i + 1`
+   # set passwordless sudo so we can install stuff
+   sudo -u $ADMIN_USERNAME ssh $WORKER_NAME$i "echo $ADMIN_PASSWORD | sudo -S sed -i 's/ALL\$/NOPASSWD:ALL/' /etc/sudoers.d/waagent"
 done
+cat $SLURM_HOSTS >> /etc/hosts
 
-# Install SLURM on master node
-###################################
+# Install everything on master node
+echo "Installing on master node" >> $DEPLOY_LOG 2>&1
+bash $BOOTSTRAP_EXE master >> $DEPLOY_LOG 2>&1
 
-# set up munge/slurm users
-export MUNGEUSER=991
-groupadd -g $MUNGEUSER munge >> /tmp/azuredeploy.log.$$ 2>&1
-useradd  -m -c "MUNGE Uid 'N' Gid Emporium" -d /var/lib/munge -u $MUNGEUSER -g munge  -s /sbin/nologin munge >> /tmp/azuredeploy.log.$$ 2>&1
-export SLURMUSER=992
-groupadd -g $SLURMUSER slurm >> /tmp/azuredeploy.log.$$ 2>&1
-useradd  -m -c "SLURM workload manager" -d /var/lib/slurm -u $SLURMUSER -g slurm  -s /bin/bash slurm >> /tmp/azuredeploy.log.$$ 2>&1
-
-# install munge
-yum install epel-release -y >> /tmp/azuredeploy.log.$$ 2>&1
-yum install -y munge-devel munge-libs munge >> /tmp/azuredeploy.log.$$ 2>&1
-/usr/sbin/create-munge-key -r >> /tmp/azuredeploy.log.$$ 2>&1
-
-# Install slurm deps and munge
-# chmod g-w /var/log >> /tmp/azuredeploy.log.$$ 2>&1 # Must do this before munge will generate key
-yum install openssl openssl-devel pam-devel numactl numactl-devel hwloc hwloc-devel lua lua-devel \
-    readline-devel rrdtool-devel ncurses-devel man2html libibmad libibumad rpm-build gcc perl-ExtUtils-MakeMaker \
-    mariadb-server mariadb-devel -y >> /tmp/azuredeploy.log.$$ 2>&1
-
-# grab slurm, convert to rpm, and install
-SLURM_VERSION=18.08.5-2     # pinned to TSD version
-SLURM_URL=https://download.schedmd.com/slurm
-SLURM_PKG=slurm-${SLURM_VERSION}.tar.bz2
-RPM_DIR=/rpmbuild/RPMS/x86_64
-wget "$SLURM_URL/$SLURM_PKG" -O "/tmp/$SLURM_PKG" >> /tmp/azuredeploy.log.$$ 2>&1
-rpmbuild -ta "/tmp/$SLURM_PKG" >> /tmp/azuredeploy.log.$$ 2>&1
-yum localinstall $RPM_DIR/*.rpm -y >> /tmp/azuredeploy.log.$$ 2>&1
-tar -C $RPM_DIR -cvf slurm-rpms.tar . >> /tmp/azuredeploy.log.$$ 2>&1
-
-# Download slurm.conf and fill in the node info
-SLURMCONF=/tmp/slurm.conf.$$
-wget $TEMPLATE_BASE/slurm.template.conf -O $SLURMCONF >> /tmp/azuredeploy.log.$$ 2>&1
-sed -i -- 's/__MASTERNODE__/'"$MASTER_NAME"'/g' $SLURMCONF >> /tmp/azuredeploy.log.$$ 2>&1
-sed -i -- 's/__WORKERNODES__/'"$WORKER_NAME"'[0-'"$lastvm"']/g' $SLURMCONF >> /tmp/azuredeploy.log.$$ 2>&1
-mkdir /var/spool/slurmctld >> /tmp/azuredeploy.log.$$ 2>&1
-chown slurm. /var/spool/slurmctld >> /tmp/azuredeploy.log.$$ 2>&1
-chmod 755 /var/spool/slurmctld >> /tmp/azuredeploy.log.$$ 2>&1
-touch /var/log/slurmctld.log >> /tmp/azuredeploy.log.$$ 2>&1
-chown slurm. /var/log/slurmctld.log >> /tmp/azuredeploy.log.$$ 2>&1
-touch /var/log/slurm_jobacct.log /var/log/slurm_jobcomp.log >> /tmp/azuredeploy.log.$$ 2>&1
-chown slurm. /var/log/slurm_jobacct.log /var/log/slurm_jobcomp.log >> /tmp/azuredeploy.log.$$ 2>&1
-
-# start services on master
-sudo -u slurm /usr/sbin/slurmctld >> /tmp/azuredeploy.log.$$ 2>&1 # Start the master daemon service
-systemctl enable munge >> /tmp/azuredeploy.log.$$ 2>&1
-systemctl start munge >> /tmp/azuredeploy.log.$$ 2>&1 # Start munged
-sudo -u slurm slurmd >> /tmp/azuredeploy.log.$$ 2>&1 # Start the node
-
-# Install slurm on all nodes by running apt-get
-# Also push munge key and slurm.conf to them
-echo "Prepare the local copy of munge key" >> /tmp/azuredeploy.log.$$ 2>&1
-
-mungekey=/tmp/munge.key.$$
-cp -f /etc/munge/munge.key $mungekey >> /tmp/azuredeploy.log.$$ 2>&1
-chown $ADMIN_USERNAME $mungekey >> /tmp/azuredeploy.log.$$ 2>&1
-
-echo "Start looping all workers" >> /tmp/azuredeploy.log.$$ 2>&1
-
-for i in $(seq 0 $lastvm); do
+echo "Looping over worker nodes" >> $DEPLOY_LOG 2>&1
+for i in $(seq 0 $LAST_VM); do
    worker=$WORKER_NAME$i
 
-   echo "SCP to $worker"  >> /tmp/azuredeploy.log.$$ 2>&1
-   sudo -u $ADMIN_USERNAME scp $mungekey $SLURMCONF /tmp/hosts.$$ slurm-rpms.tar $worker:/tmp/ >> /tmp/azuredeploy.log.$$ 2>&1
+   echo "SCP to $worker"  >> $DEPLOY_LOG 2>&1
+   sudo -u $ADMIN_USERNAME scp $MUNGEKEY $SLURM_CONF $SLURM_HOSTS $RPM_TAR $BOOTSTRAP_EXE $worker:/tmp/ >> $DEPLOY_LOG 2>&1
 
-   echo "Remote execute on $worker" >> /tmp/azuredeploy.log.$$ 2>&1
-   sudo -u $ADMIN_USERNAME ssh $ADMIN_USERNAME@$worker >> /tmp/azuredeploy.log.$$ 2>&1 << ENDSSH1
-        echo $ADMIN_PASSWORD | sudo -S sed -i 's/ALL\$/NOPASSWD:ALL/' /etc/sudoers.d/waagent
-        cat /tmp/hosts.* | sudo tee -a /etc/hosts
-
-        export MUNGEUSER=991
-        sudo groupadd -g $MUNGEUSER munge
-        sudo useradd  -m -c "MUNGE Uid 'N' Gid Emporium" -d /var/lib/munge -u $MUNGEUSER -g munge  -s /sbin/nologin munge
-        export SLURMUSER=992
-        sudo groupadd -g $SLURMUSER slurm
-        sudo useradd  -m -c "SLURM workload manager" -d /var/lib/slurm -u $SLURMUSER -g slurm  -s /bin/bash slurm
-
-        sudo yum install epel-release -y
-        sudo yum install -y openssl openssl-devel pam-devel numactl numactl-devel hwloc hwloc-devel lua lua-devel \
-            readline-devel rrdtool-devel ncurses-devel man2html libibmad libibumad rpm-build gcc perl-ExtUtils-MakeMaker \
-            mariadb-server mariadb-devel munge-devel munge-libs munge
-
-        sudo cp -f /tmp/munge.key.* /etc/munge/munge.key
-        sudo chown munge. /etc/munge/munge.key
-        rm -f /tmp/munge.*
-        sudo systemctl enable munge
-        sudo systemctl start munge
-
-        mkdir rpms
-        tar xf /tmp/slurm-rpms.tar -C rpms/
-        sudo yum localinstall -y rpms/*.rpm
-
-        sudo cp -f /tmp/slurm.conf.* /etc/slurm/slurm.conf
-        sudo chown slurm /etc/slurm/slurm.conf
-        sudo systemctl enable slurmd
-        sudo systemctl start slurmd
+   echo "Remote execute on $worker" >> $DEPLOY_LOG 2>&1
+   # update /etc/hosts with slurm nodes, install everything, then disable passwordless sudo
+   sudo -u $ADMIN_USERNAME ssh $ADMIN_USERNAME@$worker >> $DEPLOY_LOG 2>&1 << ENDSSH1
+        sudo bash -c 'cat /tmp/$SLURM_HOSTS >> /etc/hosts'
+        sudo bash /tmp/$BOOTSTRAP_EXE
+        sudo sed -i 's/NOPASSWD://' /etc/sudoers.d/waagent
 ENDSSH1
-
 done
-rm -f $mungekey
 
-# Restart slurm service on all nodes
-
-exit 0
+rm -f $MUNGEKEY
+# re-enable password for sudo
+sed -i 's/NOPASSWD://' /etc/sudoers.d/waagent
