@@ -88,7 +88,7 @@ yum install openssl openssl-devel pam-devel numactl numactl-devel hwloc hwloc-de
 SLURM_VERSION=18.08.5-2     # pinned to TSD version
 SLURM_URL=https://download.schedmd.com/slurm
 SLURM_PKG=slurm-${SLURM_VERSION}.tar.bz2
-RPM_DIR=/root/rpmbuild/RPMS/x86_64
+RPM_DIR=/rpmbuild/RPMS/x86_64
 wget "$SLURM_URL/$SLURM_PKG" -O "/tmp/$SLURM_PKG" >> /tmp/azuredeploy.log.$$ 2>&1
 rpmbuild -ta "/tmp/$SLURM_PKG" >> /tmp/azuredeploy.log.$$ 2>&1
 yum localinstall $RPM_DIR/*.rpm -y >> /tmp/azuredeploy.log.$$ 2>&1
