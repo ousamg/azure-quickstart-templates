@@ -1,5 +1,6 @@
 #!/bin/bash -e
 
+set +f
 if [[ -z $1 ]]; then
     NODE_TYPE=worker
 else
@@ -47,7 +48,7 @@ else
         echo "No slurm rpm tar found: '$RPM_TAR'"
         exit 1
     fi
-    mkdirs rpms
+    mkdir rpms
     tar -C rpms -xf $RPM_TAR
     RPM_DIR=$PWD/rpms
 fi
@@ -59,7 +60,8 @@ if [[ "$NODE_TYPE" == "master" ]]; then
     sed -i -- 's/__MASTERNODE__/'"$MASTER_NAME"'/g' $SLURM_CONF
     sed -i -- 's/__WORKERNODES__/'"$WORKER_NAME"'[0-'"$LASTVM"']/g' $SLURM_CONF
 else
-    SLURM_CONF="/tmp/slurm.conf.*"
+    # have to use ls because glob isn't expanding on ssh execution
+    SLURM_CONF=$(ls /tmp/slurm.conf.*)
     if [[ ! -f $SLURM_CONF ]]; then
         echo "No slurm.conf found: '$SLURM_CONF'"
         exit 1
@@ -69,25 +71,32 @@ cp -f $SLURM_CONF /etc/slurm/slurm.conf
 chown slurm. /etc/slurm/slurm.conf
 
 # set up log and pid dirs
-mkdir /var/spool/slurmctld /var/spool/slurm /var/run/slurm /var/log/slurm
-chmod 755 /var/spool/slurmctld /var/spool/slurm /var/run/slurm /var/log/slurm
-chown -R slurm. /var/spool/slurmctld /var/spool/slurm /var/run/slurm /var/log/slurm
-
-# start services on master
-sudo -u slurm /usr/sbin/slurmctld
-systemctl enable munge
-systemctl start munge
-sudo -u slurm slurmd
+SLURM_DIRS="/var/spool/slurmctld /var/spool/slurmd /var/log/slurm"
+mkdir -p $SLURM_DIRS
+chmod 755 $SLURM_DIRS
+chown -R slurm. $SLURM_DIRS
 
 echo "Prepare the local copy of munge key"
 if [[ "$NODE_TYPE" == "master" ]]; then
     cp -f /etc/munge/munge.key $MUNGEKEY
     chown ${ADMIN_USERNAME}. $MUNGEKEY
 else
-    MUNGEKEY="/tmp/munge.key.*"
+    # have to use ls because glob isn't expanding on ssh execution
+    MUNGEKEY=$(ls /tmp/munge.key.*)
     if [[ ! -f $MUNGEKEY ]]; then
         echo "No munge.key found: '$MUNGEKEY'"
         exit 1
     fi
     mv -f $MUNGEKEY /etc/munge/munge.key
+    chown munge. /etc/munge/munge.key
 fi
+
+# start services
+if [[ "$NODE_TYPE" == "master" ]]; then
+    systemctl enable slurmctld.service
+    systemctl start slurmctld.service
+fi
+systemctl enable munge
+systemctl start munge
+systemctl enable slurmd.service
+systemctl start slurmd.service

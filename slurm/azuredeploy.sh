@@ -35,7 +35,7 @@ export TEMPLATE_BASE=$9
 
 # Update master node
 echo $MASTER_IP $MASTER_NAME >> /etc/hosts
-echo $MASTER_IP $MASTER_NAME > /tmp/hosts.$$
+echo $MASTER_IP $MASTER_NAME > $SLURM_HOSTS
 
 # Update ssh config file to ignore unknow host
 # Note all settings are for azureuser, NOT root
@@ -56,6 +56,7 @@ export SLURM_HOSTS=/tmp/hosts.$$
 export SLURM_CONF=/tmp/slurm.conf.$$
 export BOOTSTRAP_EXE=bootstrap_node.sh
 cp $BOOTSTRAP_EXE /tmp/$BOOTSTRAP_EXE
+chmod 755 /tmp/$BOOTSTRAP_EXE
 
 # Install sshpass to automate ssh-copy-id action
 sudo yum install sshpass -y >> $DEPLOY_LOG 2>&1
@@ -87,10 +88,11 @@ for i in $(seq 0 $LAST_VM); do
 
    echo "Remote execute on $worker" >> $DEPLOY_LOG 2>&1
    # update /etc/hosts with slurm nodes, install everything, then disable passwordless sudo
-   sudo -u $ADMIN_USERNAME ssh $ADMIN_USERNAME@$worker >> $DEPLOY_LOG 2>&1 << ENDSSH1
-        sudo bash -c 'cat /tmp/$SLURM_HOSTS >> /etc/hosts'
-        sudo bash /tmp/$BOOTSTRAP_EXE
-        sudo sed -i 's/NOPASSWD://' /etc/sudoers.d/waagent
+   # have to set MUNGEKEY and SLURM_CONF in block because it's not evaluating the globs for some reason?
+sudo -u $ADMIN_USERNAME ssh $ADMIN_USERNAME@$worker << ENDSSH1
+    sudo bash -c 'cat $SLURM_HOSTS >> /etc/hosts'
+    sudo bash /tmp/$BOOTSTRAP_EXE
+    sudo sed -i 's/NOPASSWD://' /etc/sudoers.d/waagent
 ENDSSH1
 done
 
