@@ -9,6 +9,7 @@
 date > /tmp/azuredeploy.log.$$ 2>&1
 whoami >> /tmp/azuredeploy.log.$$ 2>&1
 echo $@ >> /tmp/azuredeploy.log.$$ 2>&1
+pwd >>  /tmp/azuredeploy.log.$$ 2>&1
 
 # Usage
 if [ "$#" -ne 9 ]; then
@@ -66,15 +67,15 @@ done
 
 # set up munge/slurm users
 export MUNGEUSER=991
-groupadd -g $MUNGEUSER munge
-useradd  -m -c "MUNGE Uid 'N' Gid Emporium" -d /var/lib/munge -u $MUNGEUSER -g munge  -s /sbin/nologin munge
+groupadd -g $MUNGEUSER munge >> /tmp/azuredeploy.log.$$ 2>&1
+useradd  -m -c "MUNGE Uid 'N' Gid Emporium" -d /var/lib/munge -u $MUNGEUSER -g munge  -s /sbin/nologin munge >> /tmp/azuredeploy.log.$$ 2>&1
 export SLURMUSER=992
-groupadd -g $SLURMUSER slurm
-useradd  -m -c "SLURM workload manager" -d /var/lib/slurm -u $SLURMUSER -g slurm  -s /bin/bash slurm
+groupadd -g $SLURMUSER slurm >> /tmp/azuredeploy.log.$$ 2>&1
+useradd  -m -c "SLURM workload manager" -d /var/lib/slurm -u $SLURMUSER -g slurm  -s /bin/bash slurm >> /tmp/azuredeploy.log.$$ 2>&1
 
 # install munge
-yum install -y munge-devel munge-libs munge
-/usr/sbin/create-munge-key -r
+yum install -y munge-devel munge-libs munge >> /tmp/azuredeploy.log.$$ 2>&1
+/usr/sbin/create-munge-key -r >> /tmp/azuredeploy.log.$$ 2>&1
 
 # Install slurm deps and munge
 yum install epel-release -y >> /tmp/azuredeploy.log.$$ 2>&1
@@ -85,41 +86,40 @@ yum install openssl openssl-devel pam-devel numactl numactl-devel hwloc hwloc-de
 
 # grab slurm, convert to rpm, and install
 SLURM_VERSION=18.08.5-2     # pinned to TSD version
-SLURM_URL=https://download.schedmd.com/slurm/slurm-${SLURM_VERSION}.tar.bz2
+SLURM_URL=https://download.schedmd.com/slurm
+SLURM_PKG=slurm-${SLURM_VERSION}.tar.bz2
 RPM_DIR=/root/rpmbuild/RPMS/x86_64
-wget "$SLURM_URL" >> /tmp/azuredeploy.log.$$ 2>&1
-rpmbuild -ta slurm-${SLURM_VERSION}.tar.bz2
-yum localinstall $RPM_DIR/*.rpm -y
-tar -C $RPM_DIR -cvf slurm-rpms.tar .
+wget "$SLURM_URL/$SLURM_PKG" -O "/tmp/$SLURM_PKG" >> /tmp/azuredeploy.log.$$ 2>&1
+rpmbuild -ta "/tmp/$SLURM_PKG" >> /tmp/azuredeploy.log.$$ 2>&1
+yum localinstall $RPM_DIR/*.rpm -y >> /tmp/azuredeploy.log.$$ 2>&1
+tar -C $RPM_DIR -cvf slurm-rpms.tar . >> /tmp/azuredeploy.log.$$ 2>&1
 
 # Download slurm.conf and fill in the node info
 SLURMCONF=/tmp/slurm.conf.$$
 wget $TEMPLATE_BASE/slurm.template.conf -O $SLURMCONF >> /tmp/azuredeploy.log.$$ 2>&1
 sed -i -- 's/__MASTERNODE__/'"$MASTER_NAME"'/g' $SLURMCONF >> /tmp/azuredeploy.log.$$ 2>&1
 sed -i -- 's/__WORKERNODES__/'"$WORKER_NAME"'[0-'"$lastvm"']/g' $SLURMCONF >> /tmp/azuredeploy.log.$$ 2>&1
-cp -f $SLURMCONF /etc/slurm/slurm.conf >> /tmp/azuredeploy.log.$$ 2>&1
-chown slurm /etc/slurm/slurm.conf >> /tmp/azuredeploy.log.$$ 2>&1
-mkdir /var/spool/slurmctld
-chown slurm. /var/spool/slurmctld
-chmod 755 /var/spool/slurmctld
-touch /var/log/slurmctld.log
-chown slurm: /var/log/slurmctld.log
-touch /var/log/slurm_jobacct.log /var/log/slurm_jobcomp.log
-chown slurm: /var/log/slurm_jobacct.log /var/log/slurm_jobcomp.log
+mkdir /var/spool/slurmctld >> /tmp/azuredeploy.log.$$ 2>&1
+chown slurm. /var/spool/slurmctld >> /tmp/azuredeploy.log.$$ 2>&1
+chmod 755 /var/spool/slurmctld >> /tmp/azuredeploy.log.$$ 2>&1
+touch /var/log/slurmctld.log >> /tmp/azuredeploy.log.$$ 2>&1
+chown slurm. /var/log/slurmctld.log >> /tmp/azuredeploy.log.$$ 2>&1
+touch /var/log/slurm_jobacct.log /var/log/slurm_jobcomp.log >> /tmp/azuredeploy.log.$$ 2>&1
+chown slurm. /var/log/slurm_jobacct.log /var/log/slurm_jobcomp.log >> /tmp/azuredeploy.log.$$ 2>&1
 
 # start services on master
 sudo -u slurm /usr/sbin/slurmctld >> /tmp/azuredeploy.log.$$ 2>&1 # Start the master daemon service
 systemctl enable munge >> /tmp/azuredeploy.log.$$ 2>&1
 systemctl start munge >> /tmp/azuredeploy.log.$$ 2>&1 # Start munged
-slurmd >> /tmp/azuredeploy.log.$$ 2>&1 # Start the node
+sudo -u slurm slurmd >> /tmp/azuredeploy.log.$$ 2>&1 # Start the node
 
 # Install slurm on all nodes by running apt-get
 # Also push munge key and slurm.conf to them
 echo "Prepare the local copy of munge key" >> /tmp/azuredeploy.log.$$ 2>&1
 
 mungekey=/tmp/munge.key.$$
-cp -f /etc/munge/munge.key $mungekey
-chown $ADMIN_USERNAME $mungekey
+cp -f /etc/munge/munge.key $mungekey >> /tmp/azuredeploy.log.$$ 2>&1
+chown $ADMIN_USERNAME $mungekey >> /tmp/azuredeploy.log.$$ 2>&1
 
 echo "Start looping all workers" >> /tmp/azuredeploy.log.$$ 2>&1
 
