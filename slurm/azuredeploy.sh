@@ -65,6 +65,7 @@ sudo yum install sshpass -y >> $DEPLOY_LOG 2>&1
 # The script make the assumption that the node is called $WORKER+<index> and have
 # static IP in sequence order
 LAST_VM=$(expr $NUM_OF_VM - 1)
+export LAST_VM
 for i in $(seq 0 $LAST_VM); do
    workerip=$(expr $i + $WORKER_IP_START)
    echo 'Updating host - '$WORKER_NAME$i >> $DEPLOY_LOG 2>&1
@@ -74,7 +75,6 @@ for i in $(seq 0 $LAST_VM); do
    # set passwordless sudo so we can install stuff
    sudo -u $ADMIN_USERNAME ssh $WORKER_NAME$i "echo $ADMIN_PASSWORD | sudo -S sed -i 's/ALL\$/NOPASSWD:ALL/' /etc/sudoers.d/waagent"
 done
-cat $SLURM_HOSTS >> /etc/hosts
 
 # Install everything on master node
 echo "Installing on master node" >> $DEPLOY_LOG 2>&1
@@ -92,7 +92,6 @@ for i in $(seq 0 $LAST_VM); do
    # have to set MUNGEKEY and SLURM_CONF in block because it's not evaluating the globs for some reason?
 sudo -u $ADMIN_USERNAME ssh $ADMIN_USERNAME@$worker << ENDSSH1
     sudo bash -c 'cat $SLURM_HOSTS >> /etc/hosts'
-    export LAST_VM=$LAST_VM
     sudo -E bash /tmp/$BOOTSTRAP_EXE
     sudo sed -i 's/NOPASSWD://' /etc/sudoers.d/waagent
 ENDSSH1
@@ -101,3 +100,5 @@ done
 rm -f $MUNGEKEY
 # re-enable password for sudo
 sed -i 's/NOPASSWD://' /etc/sudoers.d/waagent
+
+echo "$(date) finished bootstrapping $NUM_OF_VM nodes"
