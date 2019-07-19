@@ -7,6 +7,7 @@
 
 # Basic info
 export DEPLOY_LOG=/tmp/azuredeploy.log.$$
+export SLURM_HOSTS=/tmp/hosts.$$
 
 date > $DEPLOY_LOG 2>&1
 whoami >> $DEPLOY_LOG 2>&1
@@ -52,7 +53,6 @@ sed -i 's/ALL$/NOPASSWD:ALL/' /etc/sudoers.d/waagent
 # Set filename vars
 export RPM_TAR=/tmp/slurm-rpms.tar
 export MUNGEKEY=/tmp/munge.key.$$
-export SLURM_HOSTS=/tmp/hosts.$$
 export SLURM_CONF=/tmp/slurm.conf.$$
 export BOOTSTRAP_EXE=bootstrap_node.sh
 cp $BOOTSTRAP_EXE /tmp/$BOOTSTRAP_EXE
@@ -69,6 +69,7 @@ for i in $(seq 0 $LAST_VM); do
    workerip=$(expr $i + $WORKER_IP_START)
    echo 'Updating host - '$WORKER_NAME$i >> $DEPLOY_LOG 2>&1
    echo $WORKER_IP_BASE$workerip $WORKER_NAME$i >> $SLURM_HOSTS
+   echo $WORKER_IP_BASE$workerip $WORKER_NAME$i >> /etc/hosts
    sudo -u $ADMIN_USERNAME sh -c "sshpass -p '$ADMIN_PASSWORD' ssh-copy-id $WORKER_NAME$i"
    # set passwordless sudo so we can install stuff
    sudo -u $ADMIN_USERNAME ssh $WORKER_NAME$i "echo $ADMIN_PASSWORD | sudo -S sed -i 's/ALL\$/NOPASSWD:ALL/' /etc/sudoers.d/waagent"
@@ -92,7 +93,7 @@ for i in $(seq 0 $LAST_VM); do
 sudo -u $ADMIN_USERNAME ssh $ADMIN_USERNAME@$worker << ENDSSH1
     sudo bash -c 'cat $SLURM_HOSTS >> /etc/hosts'
     export LAST_VM=$LAST_VM
-    sudo bash /tmp/$BOOTSTRAP_EXE
+    sudo -E bash /tmp/$BOOTSTRAP_EXE
     sudo sed -i 's/NOPASSWD://' /etc/sudoers.d/waagent
 ENDSSH1
 done
