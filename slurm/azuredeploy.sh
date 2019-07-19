@@ -91,6 +91,7 @@ for i in $(seq 0 $LAST_VM); do
    # have to set MUNGEKEY and SLURM_CONF in block because it's not evaluating the globs for some reason?
 sudo -u $ADMIN_USERNAME ssh $ADMIN_USERNAME@$worker << ENDSSH1
     sudo bash -c 'cat $SLURM_HOSTS >> /etc/hosts'
+    export LAST_VM=$LAST_VM
     sudo bash /tmp/$BOOTSTRAP_EXE
     sudo sed -i 's/NOPASSWD://' /etc/sudoers.d/waagent
 ENDSSH1

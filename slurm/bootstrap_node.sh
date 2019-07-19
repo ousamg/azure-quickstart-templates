@@ -58,7 +58,7 @@ yum localinstall $RPM_DIR/*.rpm -y
 if [[ "$NODE_TYPE" == "master" ]]; then
     wget $TEMPLATE_BASE/slurm.template.conf -O $SLURM_CONF
     sed -i -- 's/__MASTERNODE__/'"$MASTER_NAME"'/g' $SLURM_CONF
-    sed -i -- 's/__WORKERNODES__/'"$WORKER_NAME"'[0-'"$LASTVM"']/g' $SLURM_CONF
+    sed -i -- 's/__WORKERNODES__/'"$WORKER_NAME"'[0-'"$LAST_VM"']/g' $SLURM_CONF
 else
     # have to use ls because glob isn't expanding on ssh execution
     SLURM_CONF=$(ls /tmp/slurm.conf.*)
